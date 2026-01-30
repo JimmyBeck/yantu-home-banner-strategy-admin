@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>策略规则管理后台 V3</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        [v-cloak] { display: none; }
+        .modal-overlay { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .multiselect-options { max-height: 200px; overflow-y: auto; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<div id="app" v-cloak class="min-h-screen flex">
+    <aside class="w-20 lg:w-64 bg-slate-900 text-white p-6 hidden md:block transition-all">
+        <h1 class="text-xl font-bold mb-10 flex items-center text-blue-400 overflow-hidden whitespace-nowrap">
+            <i class="fas fa-layer-group mr-3"></i> <span>策略引擎 V3</span>
+        </h1>
+        <nav class="space-y-4">
+            <div class="bg-blue-600/10 border-l-4 border-blue-500 p-3 text-blue-400 font-bold">
+                <i class="fas fa-route mr-2"></i> 分流逻辑
+            </div>
+        </nav>
+    </aside>
+
+    <main class="flex-1 p-8 overflow-y-auto">
+        <header class="flex justify-between items-start mb-8">
+            <div>
+                <h2 class="text-3xl font-extrabold text-slate-800 tracking-tight">新用户路径分发策略管理</h2>
+                <p class="text-slate-500 mt-2 italic">基于用户标签或题目组合，实现精准的“跳转H5+落一级分类”自动化配置。</p>
+            </div>
+            <button @click="openModal('add')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl shadow-lg shadow-indigo-200 flex items-center font-bold transition-all">
+                <i class="fas fa-plus-circle mr-2"></i> 新增策略规则
+            </button>
+        </header>
+
+        <!-- 筛选区域 -->
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-lg mb-8">
+            <div class="flex justify-between items-center mb-4">
+                <div class="text-slate-500 text-sm font-bold uppercase tracking-wider flex items-center">
+                    <i class="fas fa-filter mr-2"></i> 规则筛选
+                </div>
+                <div class="flex space-x-3">
+                    <button @click="resetFilters" class="px-4 py-1.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-lg text-xs font-bold transition">
+                        <i class="fas fa-undo mr-1"></i> 重置
+                    </button>
+                    <button @click="applyFilters" class="px-4 py-1.5 bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg text-xs font-bold transition shadow-md shadow-indigo-200">
+                        <i class="fas fa-search mr-1"></i> 立即筛选
+                    </button>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                <div v-for="q in questionConfig" :key="q.label" class="relative">
+                    <label class="block text-xs font-bold text-slate-400 mb-1.5">{{ q.label }}</label>
+                    
+                    <div class="relative">
+                        <!-- Trigger -->
+                        <div class="w-full border border-slate-200 rounded-lg p-2.5 bg-slate-50 text-xs flex justify-between items-center cursor-pointer hover:border-indigo-300 transition"
+                                @click="toggleFilterDropdown(q.label)">
+                            <span class="truncate pr-4" :class="isAny(filters[q.label]) ? 'text-slate-400 italic' : 'text-indigo-600 font-bold'">
+                                {{ formatSelected(filters[q.label]) }}
+                            </span>
+                            <i class="fas fa-chevron-down text-slate-400 text-[10px]"></i>
+                        </div>
+
+                        <!-- Dropdown -->
+                        <div v-show="activeFilterDropdown === q.label" 
+                                class="absolute z-30 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden multiselect-options">
+                            <div class="p-1">
+                                <label class="flex items-center px-3 py-2 hover:bg-slate-50 rounded cursor-pointer">
+                                    <input type="checkbox" 
+                                            :checked="isAny(filters[q.label])"
+                                            @change="handleFilterChange(q.label, 'any')"
+                                            class="w-3 h-3 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500">
+                                    <span class="ml-2 text-xs text-slate-600 italic">不限 / 忽略</span>
+                                </label>
+                                
+                                <div class="h-px bg-slate-100 my-1"></div>
+
+                                <label v-for="opt in q.options" :key="opt" class="flex items-center px-3 py-2 hover:bg-slate-50 rounded cursor-pointer">
+                                    <input type="checkbox" 
+                                            :value="opt"
+                                            :checked="isChecked(filters[q.label], opt)"
+                                            @change="handleFilterChange(q.label, opt)"
+                                            class="w-3 h-3 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500">
+                                    <span class="ml-2 text-xs text-slate-700">{{ opt }}</span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <!-- Backdrop -->
+                        <div v-if="activeFilterDropdown === q.label" @click="activeFilterDropdown = null" class="fixed inset-0 z-20 cursor-default"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
+            <table class="w-full text-left border-collapse">
+                <thead class="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                        <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">序号</th>
+                        <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">命中条件</th>
+                        <th class="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider w-64">
+                            配置页面 (是否启用)
+                        </th>
+                        <th class="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider w-64">
+                            配置一级分类 (是否启用)
+                        </th>
+                        <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-center">优先级</th>
+                        <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">管理操作</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    <tr v-for="(rule, index) in sortedRules" :key="rule.id" class="hover:bg-slate-50/50 transition">
+                        <td class="px-6 py-4 font-mono text-slate-400 text-sm">#{{ String(index + 1).padStart(2, '0') }}</td>
+                        
+                        <td class="px-6 py-4">
+                            <div class="flex flex-wrap gap-1 max-w-xs">
+                                <span v-for="(v, k) in rule.conditions" v-show="!isAny(v)" class="bg-white border border-slate-200 text-slate-600 px-2 py-0.5 rounded text-[11px] shadow-sm mb-1 mr-1">
+                                    {{k}}:{{ Array.isArray(v) ? v.join(',') : v }}
+                                </span>
+                            </div>
+                        </td>
+
+                        <td class="px-6 py-4">
+                            <div class="flex flex-col">
+                                <div class="flex items-center justify-between mb-1">
+                                    <span class="text-xs font-bold px-2 py-0.5 rounded text-slate-600 bg-slate-100 border border-slate-200">
+                                        {{ rule.targetType || '网址' }}
+                                    </span>
+                                    <button @click="toggleRuleUrl(rule)" 
+                                            :class="rule.targetUrlEnabled ? 'bg-indigo-500' : 'bg-slate-300'" 
+                                            class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none">
+                                        <span :class="rule.targetUrlEnabled ? 'translate-x-5' : 'translate-x-1'" class="inline-block h-3 w-3 transform rounded-full bg-white transition-transform"></span>
+                                    </button>
+                                </div>
+                                <div class="text-xs text-blue-600 font-semibold truncate max-w-[150px]" :title="getTargetDisplayValue(rule)">
+                                    <i :class="getTargetIcon(rule.targetType)" class="mr-1"></i> {{ getTargetDisplayValue(rule) }}
+                                </div>
+                            </div>
+                        </td>
+
+                        <td class="px-6 py-4">
+                            <div class="flex items-center justify-between">
+                                <div class="text-xs text-slate-600 truncate max-w-[150px] mr-2" :title="formatTargetCategories(rule.targetCategories)">
+                                    <i class="fas fa-th-large mr-1"></i> {{ formatTargetCategories(rule.targetCategories) || '未配置' }}
+                                </div>
+                                <div class="flex items-center">
+                                    <button @click="toggleRuleCategories(rule)" 
+                                            :class="rule.targetCategoriesEnabled ? 'bg-indigo-500' : 'bg-slate-300'" 
+                                            class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none">
+                                        <span :class="rule.targetCategoriesEnabled ? 'translate-x-5' : 'translate-x-1'" class="inline-block h-3 w-3 transform rounded-full bg-white transition-transform"></span>
+                                    </button>
+                                </div>
+                            </div>
+                        </td>
+
+                        <td class="px-6 py-4 text-center">
+                            <input type="number" v-model.number="rule.priority" class="w-16 text-center border border-slate-200 rounded p-1 text-xs font-bold focus:border-indigo-500 outline-none bg-white shadow-sm">
+                        </td>
+
+                        <td class="px-6 py-4 text-right">
+                            <div class="flex justify-end space-x-2">
+                                <button @click="openModal('view', rule)" class="px-3 py-1 bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 rounded text-xs font-bold transition">查看</button>
+                                <button @click="openModal('edit', rule)" class="px-3 py-1 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 hover:text-indigo-800 rounded text-xs font-bold transition">修改</button>
+                                <button @click="removeRule(rule.id)" class="px-3 py-1 bg-rose-50 text-rose-600 hover:bg-rose-100 hover:text-rose-800 rounded text-xs font-bold transition">删除</button>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="modal-overlay absolute inset-0" @click="showModal = false"></div>
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl z-10 overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="px-8 py-6 bg-slate-900 text-white flex justify-between items-center">
+                <div>
+                    <h3 class="text-xl font-bold">{{ modalTitle }}</h3>
+                    <p class="text-slate-400 text-xs mt-1" v-if="modalType !== 'view'">配置触发条件、跳转H5、落一级分类</p>
+                </div>
+                <button @click="showModal = false" class="text-slate-400 hover:text-white transition"><i class="fas fa-times text-2xl"></i></button>
+            </div>
+
+            <div class="p-8 overflow-y-auto custom-scrollbar flex-1 bg-white">
+                <fieldset :disabled="modalType === 'view'" class="space-y-6">
+                    
+                    <!-- 题目条件 (多选互斥) -->
+                    <div class="space-y-4">
+                        <h4 class="font-bold text-slate-800 text-sm mb-4">触发条件配置</h4>
+                        <div v-for="q in questionConfig" :key="q.label" class="space-y-1 relative group">
+                            <label class="block text-xs font-bold text-slate-500">{{ q.label }}</label>
+                            
+                            <!-- Custom Multiselect -->
+                            <div class="relative">
+                                <!-- Trigger -->
+                                <div class="w-full border-2 border-slate-100 rounded-xl p-3 bg-white text-sm flex justify-between items-center cursor-pointer hover:border-indigo-300 transition"
+                                     @click="toggleDropdown(q.label)">
+                                    <span class="truncate pr-4" :class="isAny(tempRule.conditions[q.label]) ? 'text-slate-400 italic' : 'text-slate-700 font-medium'">
+                                        {{ formatSelected(tempRule.conditions[q.label]) }}
+                                    </span>
+                                    <i class="fas fa-chevron-down text-slate-400 text-xs"></i>
+                                </div>
+
+                                <!-- Dropdown -->
+                                <div v-show="activeDropdown === q.label" 
+                                     class="absolute z-20 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden multiselect-options">
+                                    <div class="p-1">
+                                        <!-- Any Option -->
+                                        <label class="flex items-center px-3 py-2 hover:bg-slate-50 rounded cursor-pointer">
+                                            <input type="checkbox" 
+                                                   :checked="isAny(tempRule.conditions[q.label])"
+                                                   @change="handleConditionChange(q.label, 'any')"
+                                                   class="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500">
+                                            <span class="ml-2 text-sm text-slate-600 italic">不限 / 忽略</span>
+                                        </label>
+                                        
+                                        <div class="h-px bg-slate-100 my-1"></div>
+
+                                        <!-- Regular Options -->
+                                        <label v-for="opt in q.options" :key="opt" class="flex items-center px-3 py-2 hover:bg-slate-50 rounded cursor-pointer">
+                                            <input type="checkbox" 
+                                                   :value="opt"
+                                                   :checked="isChecked(tempRule.conditions[q.label], opt)"
+                                                   @change="handleConditionChange(q.label, opt)"
+                                                   class="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500">
+                                            <span class="ml-2 text-sm text-slate-700">{{ opt }}</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                
+                                <!-- Backdrop to close dropdown -->
+                                <div v-if="activeDropdown === q.label" @click="activeDropdown = null" class="fixed inset-0 z-10 cursor-default"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="h-px bg-slate-100"></div>
+
+                    <!-- Target Configuration -->
+                    <div class="p-4 bg-slate-50 rounded-xl border border-slate-100 mb-6">
+                        <div class="flex justify-between items-center mb-3">
+                            <label class="block text-sm font-bold text-slate-700">配置页面 (跳转目标)</label>
+                            <div class="flex items-center">
+                                <span class="text-xs mr-2 text-slate-500">{{ tempRule.targetUrlEnabled ? '已启用' : '已禁用' }}</span>
+                                <button @click="toggleTargetUrl" 
+                                        :class="tempRule.targetUrlEnabled ? 'bg-indigo-500' : 'bg-slate-300'"
+                                        class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none">
+                                    <span :class="tempRule.targetUrlEnabled ? 'translate-x-5' : 'translate-x-1'"
+                                          class="inline-block h-3 w-3 transform rounded-full bg-white transition-transform"></span>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Target Type Selector -->
+                        <div class="mb-3">
+                            <label class="block text-xs font-bold text-slate-500 mb-1">跳转类型</label>
+                            <select v-model="tempRule.targetType" class="w-full border-2 border-slate-200 rounded-xl p-2 focus:border-indigo-500 outline-none transition bg-white text-sm">
+                                <option value="网址">网址</option>
+                                <option value="练习tab">练习tab</option>
+                                <option value="企业活码">企业活码</option>
+                                <option value="公开直播间">公开直播间</option>
+                                <option value="容器化">容器化</option>
+                                <option value="课程详情页">课程详情页</option>
+                            </select>
+                        </div>
+
+                        <!-- Dynamic Input Based on Type -->
+                        <div class="relative">
+                            <!-- URL Input -->
+                            <div v-if="tempRule.targetType === '网址' || !tempRule.targetType">
+                                <input type="text" v-model="tempRule.targetValue" placeholder="请输入跳转链接 (http://...)" class="w-full border-2 border-slate-200 rounded-xl p-3 pl-10 focus:border-indigo-500 outline-none transition bg-white">
+                                <i class="fas fa-link absolute left-4 top-3.5 text-slate-400"></i>
+                            </div>
+
+                            <!-- Enterprise QRCode -->
+                            <div v-else-if="tempRule.targetType === '企业活码'">
+                                <input type="text" v-model="tempRule.targetValue" placeholder="请输入活码Code (如: CDE12345L)" class="w-full border-2 border-slate-200 rounded-xl p-3 pl-10 focus:border-indigo-500 outline-none transition bg-white">
+                                <i class="fas fa-qrcode absolute left-4 top-3.5 text-slate-400"></i>
+                            </div>
+
+                            <!-- Live Room -->
+                            <div v-else-if="tempRule.targetType === '公开直播间'">
+                                <input type="text" v-model="tempRule.targetValue" placeholder="请输入直播间ID" class="w-full border-2 border-slate-200 rounded-xl p-3 pl-10 focus:border-indigo-500 outline-none transition bg-white">
+                                <i class="fas fa-video absolute left-4 top-3.5 text-slate-400"></i>
+                            </div>
+
+                            <!-- Course Detail -->
+                            <div v-else-if="tempRule.targetType === '课程详情页'">
+                                <input type="text" v-model="tempRule.targetValue" placeholder="请输入商品ID" class="w-full border-2 border-slate-200 rounded-xl p-3 pl-10 focus:border-indigo-500 outline-none transition bg-white">
+                                <i class="fas fa-book absolute left-4 top-3.5 text-slate-400"></i>
+                            </div>
+
+                            <!-- Containerization -->
+                            <div v-else-if="tempRule.targetType === '容器化'">
+                                <select v-model="tempRule.targetValue" class="w-full border-2 border-slate-200 rounded-xl p-3 pl-10 focus:border-indigo-500 outline-none transition bg-white">
+                                    <option value="" disabled selected>请选择容器化内容</option>
+                                    <option value="徐涛优题库">徐涛优题库</option>
+                                    <option value="数学每日一题">数学每日一题</option>
+                                </select>
+                                <i class="fas fa-box absolute left-4 top-3.5 text-slate-400"></i>
+                            </div>
+
+                            <!-- Practice Tab (No Input Needed) -->
+                            <div v-else-if="tempRule.targetType === '练习tab'">
+                                <div class="w-full border-2 border-slate-200 rounded-xl p-3 pl-10 bg-slate-50 text-slate-500 italic">
+                                    无需填写额外信息
+                                </div>
+                                <i class="fas fa-pencil-alt absolute left-4 top-3.5 text-slate-400"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 配置一级分类 -->
+                    <div class="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                        <div class="flex justify-between items-center mb-3">
+                            <label class="block text-sm font-bold text-slate-700">配置一级分类 (多选)</label>
+                            <div class="flex items-center">
+                                <span class="text-xs mr-2 text-slate-500">{{ tempRule.targetCategoriesEnabled ? '已启用' : '已禁用' }}</span>
+                                <button @click="toggleTargetCategories" 
+                                        :class="tempRule.targetCategoriesEnabled ? 'bg-indigo-500' : 'bg-slate-300'" 
+                                        class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none">
+                                    <span :class="tempRule.targetCategoriesEnabled ? 'translate-x-5' : 'translate-x-1'" class="inline-block h-3 w-3 transform rounded-full bg-white transition-transform"></span>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="space-y-6">
+                            <div v-for="(tabs, rootName) in categoryRoots" :key="rootName" class="border border-slate-200 rounded-xl overflow-hidden">
+                                <div class="bg-slate-100 px-4 py-2 text-xs font-bold text-slate-600 uppercase border-b border-slate-200 flex justify-between items-center">
+                                    <span>{{ rootName }}</span>
+                                    <span class="text-[10px] text-slate-400 font-normal">点击下方网格快速配置</span>
+                                </div>
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-xs text-left">
+                                        <thead>
+                                            <tr class="bg-slate-50 border-b border-slate-100">
+                                                <th class="px-3 py-2 font-medium text-slate-500 w-24">一级分类 \ 年份</th>
+                                                <th v-for="year in categoryYears" :key="year" class="px-2 py-2 font-medium text-slate-500 text-center border-l border-slate-100">
+                                                    {{ year }}
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-slate-50">
+                                            <tr v-for="tab in tabs" :key="tab" class="hover:bg-slate-50/50">
+                                                <td class="px-3 py-2 font-medium text-slate-700">{{ tab }}</td>
+                                                <td v-for="year in categoryYears" :key="year" class="px-2 py-2 text-center border-l border-slate-100">
+                                                    <label class="inline-flex items-center justify-center cursor-pointer w-full h-full py-1">
+                                                        <input type="checkbox" 
+                                                               :checked="tempRule.targetCategories.includes(`${rootName} (${year}):${tab}`)" 
+                                                               @change="handleCategoryChange(rootName, year, tab)"
+                                                               class="hidden">
+                                                        <div class="w-4 h-4 rounded border flex items-center justify-center transition-colors"
+                                                             :class="tempRule.targetCategories.includes(`${rootName} (${year}):${tab}`) ? 'bg-indigo-500 border-indigo-500' : 'border-slate-300 bg-white hover:border-indigo-300'">
+                                                            <svg v-if="tempRule.targetCategories.includes(`${rootName} (${year}):${tab}`)" class="w-2.5 h-2.5 text-white fill-current" viewBox="0 0 512 512">
+                                                                <path d="M173.898 439.404l-166.4-166.4c-9.997-9.997-9.997-26.206 0-36.204l36.203-36.204c9.997-9.998 26.207-9.998 36.204 0L192 312.69 432.095 72.596c9.997-9.997 26.207-9.997 36.204 0l36.203 36.204c9.997 9.997 9.997 26.206 0 36.204l-294.4 294.401c-9.998 9.997-26.207 9.997-36.204-.001z"/>
+                                                            </svg>
+                                                        </div>
+                                                    </label>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </fieldset>
+            </div>
+
+            <div class="px-8 py-6 bg-slate-50 border-t border-slate-100 flex justify-end space-x-4">
+                <button @click="showModal = false" class="px-6 py-2 text-slate-500 font-bold hover:text-slate-700 transition">
+                    {{ modalType === 'view' ? '关闭' : '取消' }}
+                </button>
+                <button v-if="modalType !== 'view'" @click="saveRule" class="px-10 py-2 bg-indigo-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition transform active:scale-95">
+                    保存配置
+                </button>
+            </div>
+        </div>
+    </div>
+    <div v-if="showDeleteModal" class="fixed inset-0 z-[60] flex items-center justify-center p-4">
+        <div class="modal-overlay absolute inset-0" @click="showDeleteModal = false"></div>
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm z-10 overflow-hidden transform transition-all">
+            <div class="p-6 text-center">
+                <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-rose-100 mb-4">
+                    <i class="fas fa-exclamation-triangle text-rose-600 text-xl"></i>
+                </div>
+                <h3 class="text-lg leading-6 font-bold text-slate-900 mb-2">是否确认删除</h3>
+                <p class="text-sm text-slate-500">删除后该策略将无法恢复，请谨慎操作。</p>
+            </div>
+            <div class="px-6 py-4 bg-slate-50 border-t border-slate-100 flex space-x-3">
+                <button @click="showDeleteModal = false" class="flex-1 px-4 py-2 bg-white border border-slate-300 rounded-xl text-slate-700 font-bold hover:bg-slate-50 transition">
+                    取消
+                </button>
+                <button @click="confirmDelete" class="flex-1 px-4 py-2 bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 shadow-lg shadow-rose-200 transition">
+                    确认删除
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const { createApp } = Vue
+
+    createApp({
+        data() {
+            return {
+                showModal: false,
+                showDeleteModal: false,
+                deleteTargetId: null,
+                modalType: 'add',
+                activeDropdown: null,
+                activeFilterDropdown: null,
+                filters: {},
+                appliedFilters: {},
+                questionConfig: [
+                    { label: '用户身份', options: ['学生', '家长'] },
+                    { label: '用户年级', options: ['大一', '大二', '大三', '大四', '已毕业-全力备考', '已毕业-半工半读'] },
+                    { label: '考研年份', options: ['26考研', '27考研', '28考研', '29考研'] },
+                    { label: '考研专业和院校', options: ['只有专业', '只有院校', '院校专业都有', '院校专业都没有'] },
+                    { label: '关注专业', options: ['哲学', '经济学', '法学', '教育学', '文学', '历史学', '理学', '工学', '农学', '医学', '军事学', '管理学', '艺术学', '数学', '不考数学'] }
+                ],
+                categoryRoots: {
+                    '通用首页': ['寒假抢跑', '工科智选', '家长专区'],
+                    '计算机首页': ['英语学习', '数学学习', '408学习', '家长专区', '寒假抢跑']
+                },
+                categoryYears: ['2026', '2027', '2028', '2029'],
+                rules: [
+                    { 
+                        id: 1, 
+                        conditions: {
+                            '用户身份': ['学生'], 
+                            '用户年级': ['大三'],
+                            '考研年份': ['26考研'],
+                            '考研专业和院校': ['院校专业都有'],
+                            '关注专业': ['any']
+                        }, 
+                        targetType: '课程详情页',
+                        targetValue: '10086', 
+                        targetUrlEnabled: true,
+                        targetCategories: [], 
+                        targetCategoriesEnabled: false,
+                        priority: 100
+                    },
+                    { 
+                        id: 2, 
+                        conditions: {
+                            '用户身份': ['学生'],
+                            '用户年级': ['大一', '大二'],
+                            '考研年份': ['any'],
+                            '考研专业和院校': ['any'],
+                            '关注专业': ['any']
+                        }, 
+                        targetType: '练习tab',
+                        targetValue: '', 
+                        targetUrlEnabled: true,
+                        targetCategories: [], 
+                        targetCategoriesEnabled: false,
+                        priority: 90
+                    },
+                    { 
+                        id: 3, 
+                        conditions: {
+                            '用户身份': ['家长'],
+                            '用户年级': ['any'],
+                            '考研年份': ['any'],
+                            '考研专业和院校': ['any'],
+                            '关注专业': ['any']
+                        }, 
+                        targetType: '企业活码',
+                        targetValue: 'CDE12345L', 
+                        targetUrlEnabled: true,
+                        targetCategories: ['通用首页 (2026):家长专区'], 
+                        targetCategoriesEnabled: true,
+                        priority: 85
+                    },
+                    { 
+                        id: 4, 
+                        conditions: {
+                            '用户身份': ['学生'],
+                            '用户年级': ['any'],
+                            '考研年份': ['26考研', '27考研'],
+                            '考研专业和院校': ['any'],
+                            '关注专业': ['不考数学', '艺术学', '文学']
+                        }, 
+                        targetType: '公开直播间',
+                        targetValue: 'LIVE_ROOM_888', 
+                        targetUrlEnabled: true,
+                        targetCategories: [], 
+                        targetCategoriesEnabled: false,
+                        priority: 80
+                    },
+                    { 
+                        id: 5, 
+                        conditions: {
+                            '用户身份': ['学生'],
+                            '用户年级': ['any'],
+                            '考研年份': ['any'],
+                            '考研专业和院校': ['any'],
+                            '关注专业': ['工学', '数学']
+                        }, 
+                        targetType: '网址',
+                        targetValue: '', 
+                        targetUrlEnabled: false,
+                        targetCategories: ['计算机首页 (2026):408学习', '计算机首页 (2026):数学学习'], 
+                        targetCategoriesEnabled: true,
+                        priority: 75
+                    },
+                    { 
+                        id: 6, 
+                        conditions: {
+                            '用户身份': ['学生'],
+                            '用户年级': ['any'],
+                            '考研年份': ['26考研'],
+                            '考研专业和院校': ['any'],
+                            '关注专业': ['any']
+                        }, 
+                        targetType: '容器化',
+                        targetValue: '徐涛优题库', 
+                        targetUrlEnabled: true,
+                        targetCategories: [], 
+                        targetCategoriesEnabled: false,
+                        priority: 70
+                    },
+                    { 
+                        id: 7, 
+                        conditions: {
+                            '用户身份': ['学生'],
+                            '用户年级': ['any'],
+                            '考研年份': ['27考研', '28考研'],
+                            '考研专业和院校': ['any'],
+                            '关注专业': ['数学', '理学', '工学', '经济学']
+                        }, 
+                        targetType: '容器化',
+                        targetValue: '数学每日一题', 
+                        targetUrlEnabled: true,
+                        targetCategories: [], 
+                        targetCategoriesEnabled: false,
+                        priority: 65
+                    },
+                    { 
+                        id: 8, 
+                        conditions: {
+                            '用户身份': ['学生'],
+                            '用户年级': ['已毕业-全力备考'],
+                            '考研年份': ['any'],
+                            '考研专业和院校': ['any'],
+                            '关注专业': ['any']
+                        }, 
+                        targetType: '网址',
+                        targetValue: 'https://kaoyan.icourse163.org/pro', 
+                        targetUrlEnabled: true,
+                        targetCategories: ['通用首页 (2026):寒假抢跑'], 
+                        targetCategoriesEnabled: true,
+                        priority: 60
+                    },
+                    { 
+                        id: 9, 
+                        conditions: {
+                            '用户身份': ['学生'],
+                            '用户年级': ['已毕业-半工半读'],
+                            '考研年份': ['any'],
+                            '考研专业和院校': ['any'],
+                            '关注专业': ['any']
+                        }, 
+                        targetType: '网址',
+                        targetValue: 'https://kaoyan.icourse163.org/part-time', 
+                        targetUrlEnabled: true,
+                        targetCategories: [], 
+                        targetCategoriesEnabled: false,
+                        priority: 55
+                    },
+                    { 
+                        id: 10, 
+                        conditions: {
+                            '用户身份': ['学生'],
+                            '用户年级': ['大四'],
+                            '考研年份': ['26考研'],
+                            '考研专业和院校': ['any'],
+                            '关注专业': ['any']
+                        }, 
+                        targetType: '课程详情页',
+                        targetValue: '2024001', 
+                        targetUrlEnabled: true,
+                        targetCategories: [], 
+                        targetCategoriesEnabled: false,
+                        priority: 50
+                    },
+                    { 
+                        id: 11, 
+                        conditions: {
+                            '用户身份': ['学生'],
+                            '用户年级': ['大一'],
+                            '考研年份': ['any'],
+                            '考研专业和院校': ['any'],
+                            '关注专业': ['any']
+                        }, 
+                        targetType: '网址',
+                        targetValue: 'https://test.com', 
+                        targetUrlEnabled: false,
+                        targetCategories: [], 
+                        targetCategoriesEnabled: false,
+                        priority: 10
+                    }
+                ],
+                tempRule: { 
+                    id: null, 
+                    conditions: {}, 
+                    targetUrl: '', 
+                    targetUrlEnabled: true,
+                    targetCategories: [], 
+                    targetCategoriesEnabled: true,
+                    priority: 1 
+                }
+            }
+        },
+        created() {
+            this.questionConfig.forEach(q => {
+                this.filters[q.label] = ['any'];
+                this.appliedFilters[q.label] = ['any'];
+            });
+        },
+        computed: {
+            sortedRules() {
+                // Priority descending
+                let rules = [...this.rules];
+                
+                // Apply filters (using appliedFilters instead of filters)
+                rules = rules.filter(rule => {
+                    return this.questionConfig.every(q => {
+                        const filterVal = this.appliedFilters[q.label];
+                        if (this.isAny(filterVal)) return true; // No filter on this column
+                        
+                        const ruleVal = rule.conditions[q.label];
+                        if (this.isAny(ruleVal)) return false; // Rule is generic/any, doesn't match specific tag search
+                        
+                        const rArr = Array.isArray(ruleVal) ? ruleVal : [ruleVal];
+                        const fArr = Array.isArray(filterVal) ? filterVal : [filterVal];
+                        return rArr.some(r => fArr.includes(r));
+                    });
+                });
+
+                return rules.sort((a, b) => b.priority - a.priority);
+            },
+            modalTitle() {
+                if (this.modalType === 'add') return '新增策略规则';
+                if (this.modalType === 'edit') return '修改路由规则';
+                return '规则配置明细';
+            }
+        },
+        methods: {
+            openModal(type, rule = null) {
+                this.modalType = type;
+                this.activeDropdown = null;
+                if (rule) {
+                    this.tempRule = JSON.parse(JSON.stringify(rule));
+                } else {
+                    this.tempRule = { 
+                        id: Date.now(), 
+                        conditions: {}, 
+                        targetType: '网址',
+                        targetValue: '', 
+                        targetUrlEnabled: false, 
+                        targetCategories: [], 
+                        targetCategoriesEnabled: false, 
+                        priority: 10 
+                    };
+                    // Initialize conditions with 'any' for all fields
+                    this.questionConfig.forEach(q => {
+                        this.tempRule.conditions[q.label] = ['any'];
+                    });
+                }
+                this.showModal = true;
+            },
+            saveRule() {
+                // Ensure targetValue is set correctly based on type
+                if (this.tempRule.targetType === '练习tab') {
+                    this.tempRule.targetValue = ''; // No value needed
+                }
+                
+                // Validation: At least one config must be set (configured, not necessarily enabled)
+                // 1. Target URL Configured?
+                const isUrlConfigured = (this.tempRule.targetType === '练习tab') || 
+                                      (this.tempRule.targetValue && String(this.tempRule.targetValue).trim().length > 0);
+                
+                // 2. Target Categories Configured?
+                const isCategoriesConfigured = this.tempRule.targetCategories && this.tempRule.targetCategories.length > 0;
+
+                if (!isUrlConfigured && !isCategoriesConfigured) {
+                    alert('请先配置页面（跳转目标）或 配置一级分类（多选），任选其一。');
+                    return;
+                }
+
+                if (this.modalType === 'add') {
+                    this.rules.unshift(JSON.parse(JSON.stringify(this.tempRule)));
+                } else {
+                    const index = this.rules.findIndex(r => r.id === this.tempRule.id);
+                    if (index !== -1) {
+                        this.rules.splice(index, 1, JSON.parse(JSON.stringify(this.tempRule)));
+                    }
+                }
+                // Update filters immediately if needed or just close
+                this.showModal = false;
+                this.applyFilters(); // Re-apply filters to show new/updated rule if matches
+            },
+            removeRule(id) { 
+                this.deleteTargetId = id;
+                this.showDeleteModal = true;
+            },
+            confirmDelete() {
+                if (this.deleteTargetId) {
+                    const idx = this.rules.findIndex(r => r.id === this.deleteTargetId);
+                    if (idx !== -1) this.rules.splice(idx, 1);
+                    this.applyFilters(); // Re-apply filters after deletion
+                }
+                this.showDeleteModal = false;
+                this.deleteTargetId = null;
+            },
+            allAny(cond) { 
+                if (!cond) return true;
+                return Object.values(cond).every(v => this.isAny(v)) || Object.keys(cond).length === 0; 
+            },
+            isAny(val) {
+                return !val || val === 'any' || (Array.isArray(val) && val.includes('any')) || (Array.isArray(val) && val.length === 0);
+            },
+            isChecked(currentVal, opt) {
+                return Array.isArray(currentVal) && currentVal.includes(opt);
+            },
+            formatSelected(val) {
+                if (this.isAny(val)) return '不限 / 忽略';
+                return Array.isArray(val) ? val.join(', ') : val;
+            },
+            toggleDropdown(label) {
+                this.activeDropdown = this.activeDropdown === label ? null : label;
+            },
+            toggleFilterDropdown(label) {
+                this.activeFilterDropdown = this.activeFilterDropdown === label ? null : label;
+            },
+            applyFilters() {
+                this.appliedFilters = JSON.parse(JSON.stringify(this.filters));
+            },
+            resetFilters() {
+                this.questionConfig.forEach(q => {
+                    this.filters[q.label] = ['any'];
+                });
+                this.appliedFilters = JSON.parse(JSON.stringify(this.filters));
+            },
+            handleFilterChange(label, value) {
+                let current = this.filters[label];
+                if (!Array.isArray(current)) current = [];
+                
+                if (value === 'any') {
+                    this.filters[label] = ['any'];
+                } else {
+                    if (current.includes('any')) {
+                        current = [value];
+                    } else {
+                        const index = current.indexOf(value);
+                        if (index > -1) {
+                            current.splice(index, 1);
+                        } else {
+                            current.push(value);
+                        }
+                    }
+                    if (current.length === 0) {
+                        current = ['any'];
+                    }
+                    this.filters[label] = current;
+                }
+            },
+            handleConditionChange(label, value) {
+                let current = this.tempRule.conditions[label];
+                if (!Array.isArray(current)) current = [];
+                
+                if (value === 'any') {
+                    // Selected 'any', clear others
+                    this.tempRule.conditions[label] = ['any'];
+                } else {
+                    // Selected a specific option
+                    if (current.includes('any')) {
+                        // If 'any' was selected, clear it and select the new one
+                        current = [value];
+                    } else {
+                        // Toggle selection
+                        const index = current.indexOf(value);
+                        if (index > -1) {
+                            current.splice(index, 1);
+                        } else {
+                            current.push(value);
+                        }
+                    }
+                    
+                    // If nothing selected, revert to 'any'
+                    if (current.length === 0) {
+                        current = ['any'];
+                    }
+                    
+                    this.tempRule.conditions[label] = current;
+                }
+            },
+            getTargetIcon(type) {
+                switch (type) {
+                    case '网址': return 'fa-link';
+                    case '练习tab': return 'fa-pencil-alt';
+                    case '企业活码': return 'fa-qrcode';
+                    case '公开直播间': return 'fa-video';
+                    case '容器化': return 'fa-box';
+                    case '课程详情页': return 'fa-book';
+                    default: return 'fa-link';
+                }
+            },
+            getTargetDisplayValue(rule) {
+                if (rule.targetType === '练习tab') return '练习模块';
+                if (!rule.targetValue) return '未配置';
+                return rule.targetValue;
+            },
+            formatTargetCategories(categories) {
+                if (!categories || categories.length === 0) return '';
+                return categories.map(c => {
+                    if (c.includes(':')) {
+                        const [rootYear, tab] = c.split(':');
+                        // rootYear is "通用首页 (2026)" -> "通用首页 2026"
+                        const cleanRootYear = rootYear.replace(/[()]/g, '');
+                        return `${tab} (${cleanRootYear})`;
+                    }
+                    return c;
+                }).join(', ');
+            },
+            ensureCdePrefix() {
+                if (this.tempRule.targetType === '企业活码' && this.tempRule.targetValue) {
+                    // Trim whitespace first
+                    let val = this.tempRule.targetValue.trim();
+                    if (val) {
+                        if (val.toUpperCase().startsWith('CDE')) {
+                            // Fix case if needed (e.g. cde123 -> CDE123)
+                            if (!val.startsWith('CDE')) {
+                                val = 'CDE' + val.substring(3);
+                            }
+                        } else {
+                            // Prepend CDE if missing
+                            val = 'CDE' + val;
+                        }
+                        this.tempRule.targetValue = val;
+                    }
+                }
+            },
+            handleCategoryChange(rootName, year, tab) {
+                const targetKey = `${rootName} (${year}):${tab}`;
+                const prefix = `${rootName} (${year}):`;
+                
+                // If already selected, deselect it
+                if (this.tempRule.targetCategories.includes(targetKey)) {
+                    this.tempRule.targetCategories = this.tempRule.targetCategories.filter(c => c !== targetKey);
+                } else {
+                    // If not selected, remove any other items with same prefix (same root+year), then add this one
+                    this.tempRule.targetCategories = this.tempRule.targetCategories.filter(c => !c.startsWith(prefix));
+                    this.tempRule.targetCategories.push(targetKey);
+                }
+
+                // Auto-disable if no categories selected
+                if (this.tempRule.targetCategories.length === 0) {
+                    this.tempRule.targetCategoriesEnabled = false;
+                }
+            },
+            toggleTargetCategories() {
+                if (this.tempRule.targetCategoriesEnabled) {
+                    // Currently enabled, allow disabling
+                    this.tempRule.targetCategoriesEnabled = false;
+                } else {
+                    // Currently disabled, check if any categories are selected
+                    if (this.tempRule.targetCategories.length > 0) {
+                        this.tempRule.targetCategoriesEnabled = true;
+                    } else {
+                        alert('请先配置一级分类，勾选下方表格中的选项后才能启用。');
+                    }
+                }
+            },
+            toggleTargetUrl() {
+                if (this.tempRule.targetUrlEnabled) {
+                    this.tempRule.targetUrlEnabled = false;
+                } else {
+                    // Validation
+                    if (this.tempRule.targetType === '练习tab') {
+                        this.tempRule.targetUrlEnabled = true;
+                        return;
+                    }
+                    
+                    if (this.tempRule.targetValue && String(this.tempRule.targetValue).trim()) {
+                        this.tempRule.targetUrlEnabled = true;
+                    } else {
+                        alert('请先填写配置页面的详细信息（链接、ID或Code）后才能启用。');
+                    }
+                }
+            },
+            toggleRuleUrl(rule) {
+                if (rule.targetUrlEnabled) {
+                    rule.targetUrlEnabled = false;
+                } else {
+                    // Validation
+                    if (rule.targetType === '练习tab') {
+                        rule.targetUrlEnabled = true;
+                        return;
+                    }
+                    
+                    if (rule.targetValue && String(rule.targetValue).trim()) {
+                        rule.targetUrlEnabled = true;
+                    } else {
+                        alert('无法开启，请先完成配置内容。');
+                    }
+                }
+            },
+            toggleRuleCategories(rule) {
+                if (rule.targetCategoriesEnabled) {
+                    rule.targetCategoriesEnabled = false;
+                } else {
+                    if (rule.targetCategories && rule.targetCategories.length > 0) {
+                        rule.targetCategoriesEnabled = true;
+                    } else {
+                        alert('无法开启，请先完成配置内容。');
+                    }
+                }
+            }
+        },
+        mounted() {
+            // Migrate existing data: map targetUrl to targetType='网址' and targetValue=targetUrl
+            this.rules.forEach(rule => {
+                if (!rule.targetType) {
+                    rule.targetType = '网址';
+                    rule.targetValue = rule.targetUrl || '';
+                }
+                // Migrate categories if needed (simple migration: assume generic or just keep as is if no prefix)
+                // For demo data, we will manually update the initial data structure in the code.
+            });
+        }
+    }).mount('#app')
+</script>
+</body>
+</html>
